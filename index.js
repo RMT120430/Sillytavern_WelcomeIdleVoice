@@ -1,12 +1,16 @@
 import {
     extension_settings,
-    saveSettingsDebounced,
 } from "../../../extensions.js";
+
+// 修正點：saveSettingsDebounced 通常位於 script.js，路徑需要多往上一層
+// 如果你的環境報錯找不到 script.js，請嘗試改成 "../../../script.js"
+import {
+    saveSettingsDebounced,
+} from "../../../../script.js";
 
 const extensionName = "Sillytavern_WelcomeIdleVoice";
 
-// --- 修正點 1: 動態獲取插件的真實路徑 (解決路徑錯誤) ---
-// 這會自動抓取 index.js 所在的網址目錄，例如 http://localhost:8000/extensions/Sillytavern_WelcomeIdleVoice/
+// 自動抓取當前模組的路徑
 const scriptUrl = import.meta.url; 
 const extensionRootUrl = scriptUrl.substring(0, scriptUrl.lastIndexOf('/') + 1);
 
@@ -36,19 +40,15 @@ function loadSettings() {
     console.log(`[${extensionName}] Settings loaded.`);
 }
 
-// --- 修正點 2: 更強壯的路徑處理 ---
-function getFullAudioUrl(relativePath) {
-    if (!relativePath) return null;
-    // 如果使用者填寫了 http 開頭的網址，直接用
-    if (relativePath.startsWith("http")) return relativePath;
-    
-    // 移除開頭的斜線，避免雙重斜線
-    const cleanPath = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
-    
-    // 拼接待 index.js 的目錄
+// 取得正確的音訊路徑
+function getFullAudioUrl(src) {
+    if (!src) return null;
+    if (src.startsWith("http")) return src;
+    const cleanPath = src.startsWith('/') ? src.slice(1) : src;
     return `${extensionRootUrl}${cleanPath}`;
 }
 
+// 播放邏輯
 function playSound(src, isTest = false) {
     const fullUrl = getFullAudioUrl(src);
     if (!fullUrl) return;
@@ -97,7 +97,7 @@ function setupIdleListeners() {
     resetIdleTimer();
 }
 
-// 啟動音效 (等待使用者互動)
+// 啟動音效
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
     if (hasPlayedStartup) return;
@@ -116,19 +116,16 @@ function triggerStartupAction() {
     );
 }
 
-// --- 修正點 3: UI 渲染與重試機制 ---
+// UI 渲染
 function renderSettings() {
     const settingsContainerId = `${extensionName}_settings`;
     const targetContainer = $('#extensions_settings');
 
-    // 關鍵：如果目標容器還不存在，稍後再試 (這是 UI 不顯示的主因)
     if (targetContainer.length === 0) {
-        console.log(`[${extensionName}] Extensions menu not ready. Retrying in 500ms...`);
         setTimeout(renderSettings, 500);
         return;
     }
 
-    // 如果已經渲染過，先移除舊的
     $(`#${settingsContainerId}`).remove();
 
     const html = `
@@ -174,18 +171,14 @@ function renderSettings() {
                     <small>Volume:</small>
                     <input type="number" class="text_pole" id="${extensionName}_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0" style="width: 80px;">
                 </div>
-                <div style="margin-top:5px; font-size:0.8em; opacity:0.6;">
-                    Detected Path: ${extensionRootUrl}audio/
-                </div>
             </div>
         </div>
     </div>
     `;
 
     targetContainer.append(html);
-    console.log(`[${extensionName}] UI Rendered Successfully.`);
 
-    // 綁定事件
+    // 事件綁定
     $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
@@ -213,12 +206,11 @@ function renderSettings() {
         saveSettingsDebounced();
     });
     
-    // 測試按鈕
     $(`#${extensionName}_test_startup`).click(() => playSound(extension_settings[extensionName].startupSoundSrc, true));
     $(`#${extensionName}_test_idle`).click(() => playSound(extension_settings[extensionName].idleSoundSrc, true));
 }
 
-// 摺疊選單事件 (使用 document 代理，防止元素重建失效)
+// 摺疊選單事件
 $(document).on('click', `#${extensionName}_settings .inline-drawer-toggle`, function() {
     const icon = $(this).find('.inline-drawer-icon');
     const content = $(this).next('.inline-drawer-content');
@@ -233,8 +225,6 @@ jQuery(async () => {
         loadSettings();
         setupIdleListeners();
         triggerStartupAction();
-        
-        // 嘗試渲染 UI (內部有重試機制)
         renderSettings();
     } catch (e) {
         console.error(`[${extensionName}] Fatal Error:`, e);
