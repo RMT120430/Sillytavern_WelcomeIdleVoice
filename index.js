@@ -9,9 +9,9 @@ const extensionFolderPath = `extensions/${extensionName}/`;
 // 預設設定
 const defaultSettings = {
     enableStartup: true,
-    startupSoundSrc: "audio/welcome.mp3", // 預設路徑建議指引到 audio 資料夾
+    startupSoundSrc: "audio/welcome.wav", // 預設路徑建議指引到 audio 資料夾
     enableIdle: true,
-    idleSoundSrc: "audio/idle.mp3",
+    idleSoundSrc: "audio/idle.wav",
     idleTimeout: 60,
     volume: 0.5
 };
@@ -40,7 +40,7 @@ function playSound(src) {
     // 判斷路徑：如果是 http 開頭或是絕對路徑則不變，否則加上插件路徑
     let finalSrc = src;
     if (!src.startsWith("http") && !src.startsWith("/") && !src.startsWith("file")) {
-        // 這樣使用者只需要填 "audio/xxx.mp3"
+        // 這樣使用者只需要填 "audio/xxx.wav"
         finalSrc = extensionFolderPath + src;
     }
 
@@ -114,7 +114,7 @@ function renderSettings() {
                 </div>
                 <div>
                     <small>Startup Audio Path (Relative to extension folder)</small>
-                    <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.mp3">
+                    <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.wav">
                 </div>
 
                 <hr>
@@ -127,7 +127,7 @@ function renderSettings() {
                 </div>
                 <div>
                     <small>Idle Audio Path</small>
-                    <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.mp3">
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.wav">
                 </div>
                 <div>
                     <small>Idle Timeout (Seconds)</small>
