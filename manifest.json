@@ -1,0 +1,11 @@
+{
+  "display_name": "Welcome & Idle Voice",
+  "loading_order": 2,
+  "requires": [],
+  "optional": [],
+  "generate_interceptor": "Sillytavern_WelcomeIdleVoice",
+  "js": "index.js",
+  "author": "RMT120430",
+  "version": "1.0.0",
+  "homePage": "https://github.com/RMT120430/Sillytavern_WelcomeIdleVoice"
+}
