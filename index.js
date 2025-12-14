@@ -14,7 +14,9 @@ const defaultSettings = {
     enableStartup: true,
     startupSoundSrc: "audio/welcome.wav",
     enableIdle: true,
-    idleSoundSrc: "audio/idle.wav",
+    idleSoundSrc1: "audio/idle1.wav",
+    idleSoundSrc2: "audio/idle2.wav",
+    idleSoundSrc3: "audio/idle3.wav",
     idleTimeout: 60,
     volume: 0.9
 };
@@ -40,7 +42,7 @@ async function loadAudioBuffer(url) {
         const arrayBuffer = await response.arrayBuffer();
         return await ctx.decodeAudioData(arrayBuffer);
     } catch (e) {
-        console.warn(`[${extensionName}] Load failed: ${url} - index.js:43`, e);
+        console.warn(`[${extensionName}] Load failed: ${url}  index.js:43 - index_v2.js:45`, e);
         return null;
     }
 }
@@ -72,7 +74,7 @@ async function playSound(srcOrBuffer, isTest = false) {
     gainNode.connect(ctx.destination);
     source.start(0);
 
-    if (isTest) console.log(`[${extensionName}] Test sound played. - index.js:75`);
+    if (isTest) console.log(`[${extensionName}] Test sound played.  index.js:75 - index_v2.js:77`);
 }
 
 function attachGlobalUnlockListener() {
@@ -83,11 +85,11 @@ function attachGlobalUnlockListener() {
         
         if (ctx.state === 'suspended') {
             ctx.resume().then(() => {
-                console.log(`[${extensionName}] Audio Engine Unlocked via user gesture! - index.js:86`);
+                console.log(`[${extensionName}] Audio Engine Unlocked via user gesture!  index.js:86 - index_v2.js:88`);
                 isContextUnlocked = true;
                 
                 if (extension_settings[extensionName]?.enableStartup && startupBuffer && !hasPlayedStartup) {
-                    console.log(`[${extensionName}] Buffer ready + Engine unlocked. Playing NOW. - index.js:90`);
+                    console.log(`[${extensionName}] Buffer ready + Engine unlocked. Playing NOW.  index.js:90 - index_v2.js:92`);
                     playSound(startupBuffer);
                     hasPlayedStartup = true;
                 }
@@ -108,6 +110,15 @@ function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
     }
+
+    if (extension_settings[extensionName].idleSoundSrc !== undefined) {
+        if (!extension_settings[extensionName].idleSoundSrc1) {
+            extension_settings[extensionName].idleSoundSrc1 = extension_settings[extensionName].idleSoundSrc;
+        }
+        delete extension_settings[extensionName].idleSoundSrc;
+        saveSettingsDebounced();
+    }
+
     for (const key in defaultSettings) {
         if (!Object.hasOwn(extension_settings[extensionName], key)) {
             extension_settings[extensionName][key] = defaultSettings[key];
@@ -126,12 +137,12 @@ async function preloadStartup() {
     if (!extension_settings[extensionName].enableStartup) return;
     const url = getFullAudioUrl(extension_settings[extensionName].startupSoundSrc);
     if (url) {
-        console.log(`[${extensionName}] Downloading startup sound... - index.js:129`);
+        console.log(`[${extensionName}] Downloading startup sound...  index.js:129 - index_v2.js:140`);
         startupBuffer = await loadAudioBuffer(url);
         
         const ctx = getAudioContext();
         if (ctx.state === 'running' && !hasPlayedStartup && isContextUnlocked) {
-            console.log(`[${extensionName}] Download finished after unlock. Playing NOW. - index.js:134`);
+            console.log(`[${extensionName}] Download finished after unlock. Playing NOW.  index.js:134 - index_v2.js:145`);
             playSound(startupBuffer);
             hasPlayedStartup = true;
         }
@@ -148,8 +159,23 @@ function triggerIdleAction() {
     const ctx = getAudioContext();
     if (ctx.state === 'running') {
         isIdle = true;
-        console.log(`[${extensionName}] Idle triggered. - index.js:151`);
-        playSound(extension_settings[extensionName].idleSoundSrc);
+
+        const settings = extension_settings[extensionName];
+        const sources = [
+            settings.idleSoundSrc1, 
+            settings.idleSoundSrc2, 
+            settings.idleSoundSrc3
+        ].filter(src => src && src.trim() !== "");
+
+        if (sources.length === 0) {
+            console.log(`[${extensionName}] Idle triggered but no sources defined. - index_v2.js:171`);
+            return;
+        }
+
+        const randomSrc = sources[Math.floor(Math.random() * sources.length)];
+
+        console.log(`[${extensionName}] Idle triggered. Playing random source: ${randomSrc} - index_v2.js:177`);
+        playSound(randomSrc);
     }
 }
 
@@ -205,13 +231,31 @@ function renderSettings() {
                 <div class="flex-container">
                     <label class="checkbox_label">
                         <input type="checkbox" id="${extensionName}_enable_idle" ${extension_settings[extensionName].enableIdle ? "checked" : ""}>
-                        Enable Idle Sound
+                        Enable Idle Sound (Randomizes between 3 slots)
                     </label>
                 </div>
+                
+                <!-- Idle Slot 1 -->
                 <div class="flex-container">
-                    <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.wav" style="flex:1;">
-                    <div id="${extensionName}_test_idle" class="menu_button">Test</div>
+                    <small style="width: 20px;">1.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src1" value="${extension_settings[extensionName].idleSoundSrc1 || ''}" placeholder="audio/idle1.wav" style="flex:1;">
+                    <div id="${extensionName}_test_idle1" class="menu_button">Test</div>
                 </div>
+                
+                <!-- Idle Slot 2 -->
+                <div class="flex-container" style="margin-top:5px;">
+                    <small style="width: 20px;">2.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src2" value="${extension_settings[extensionName].idleSoundSrc2 || ''}" placeholder="audio/idle2.wav" style="flex:1;">
+                    <div id="${extensionName}_test_idle2" class="menu_button">Test</div>
+                </div>
+
+                <!-- Idle Slot 3 -->
+                <div class="flex-container" style="margin-top:5px;">
+                    <small style="width: 20px;">3.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src3" value="${extension_settings[extensionName].idleSoundSrc3 || ''}" placeholder="audio/idle3.wav" style="flex:1;">
+                    <div id="${extensionName}_test_idle3" class="menu_button">Test</div>
+                </div>
+
                 <div class="flex-container" style="align-items: center; margin-top: 5px;">
                     <small style="flex:1;">Idle Timeout (Min 60s):</small>
                     <input type="number" class="text_pole" id="${extensionName}_timeout_input" value="${extension_settings[extensionName].idleTimeout}" min="60" style="width: 70px; margin-right: 5px;">
@@ -250,10 +294,20 @@ function renderSettings() {
         resetIdleTimer();
         saveSettingsDebounced();
     });
-    $(`#${extensionName}_idle_src`).on('input', function() {
-        extension_settings[extensionName].idleSoundSrc = $(this).val();
+
+    $(`#${extensionName}_idle_src1`).on('input', function() {
+        extension_settings[extensionName].idleSoundSrc1 = $(this).val();
         saveSettingsDebounced();
     });
+    $(`#${extensionName}_idle_src2`).on('input', function() {
+        extension_settings[extensionName].idleSoundSrc2 = $(this).val();
+        saveSettingsDebounced();
+    });
+    $(`#${extensionName}_idle_src3`).on('input', function() {
+        extension_settings[extensionName].idleSoundSrc3 = $(this).val();
+        saveSettingsDebounced();
+    });
+
     $(`#${extensionName}_volume`).on('change', function() {
         extension_settings[extensionName].volume = parseFloat($(this).val());
         saveSettingsDebounced();
@@ -277,9 +331,18 @@ function renderSettings() {
         e.stopPropagation();
         playSound(extension_settings[extensionName].startupSoundSrc, true);
     });
-    $(`#${extensionName}_test_idle`).on('click', (e) => {
+
+    $(`#${extensionName}_test_idle1`).on('click', (e) => {
         e.stopPropagation();
-        playSound(extension_settings[extensionName].idleSoundSrc, true);
+        playSound(extension_settings[extensionName].idleSoundSrc1, true);
+    });
+    $(`#${extensionName}_test_idle2`).on('click', (e) => {
+        e.stopPropagation();
+        playSound(extension_settings[extensionName].idleSoundSrc2, true);
+    });
+    $(`#${extensionName}_test_idle3`).on('click', (e) => {
+        e.stopPropagation();
+        playSound(extension_settings[extensionName].idleSoundSrc3, true);
     });
 }
 
@@ -291,8 +354,8 @@ jQuery(async () => {
         await preloadStartup();
         setupIdleListeners();
         renderSettings();
-        console.log(`[${extensionName}] Ready. - index.js:294`);
+        console.log(`[${extensionName}] Ready.  index.js:294 - index_v2.js:357`);
     } catch (e) {
-        console.error(`[${extensionName}] Error: - index.js:296`, e);
+        console.error(`[${extensionName}] Error:  index.js:296 - index_v2.js:359`, e);
     }
 });
