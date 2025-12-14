@@ -4,10 +4,12 @@ import {
 } from "../../../extensions.js";
 
 const extensionName = "Sillytavern_WelcomeIdleVoice";
-// 自動抓取當前模組的路徑，比硬編碼更安全
-const extensionFolderPath = `extensions/${extensionName}/`;
 
-// 預設設定
+// --- 修正點 1: 動態獲取插件的真實路徑 (解決路徑錯誤) ---
+// 這會自動抓取 index.js 所在的網址目錄，例如 http://localhost:8000/extensions/Sillytavern_WelcomeIdleVoice/
+const scriptUrl = import.meta.url; 
+const extensionRootUrl = scriptUrl.substring(0, scriptUrl.lastIndexOf('/') + 1);
+
 const defaultSettings = {
     enableStartup: true,
     startupSoundSrc: "audio/welcome.wav",
@@ -31,122 +33,105 @@ function loadSettings() {
             extension_settings[extensionName][key] = defaultSettings[key];
         }
     }
+    console.log(`[${extensionName}] Settings loaded.`);
 }
 
-// 取得正確的音訊路徑
-function getAudioUrl(src) {
-    if (!src) return null;
-    if (src.startsWith("http") || src.startsWith("/")) {
-        return src;
-    }
-    // 確保路徑拼接正確
-    return `${extensionFolderPath}${src}`;
+// --- 修正點 2: 更強壯的路徑處理 ---
+function getFullAudioUrl(relativePath) {
+    if (!relativePath) return null;
+    // 如果使用者填寫了 http 開頭的網址，直接用
+    if (relativePath.startsWith("http")) return relativePath;
+    
+    // 移除開頭的斜線，避免雙重斜線
+    const cleanPath = relativePath.startsWith('/') ? relativePath.slice(1) : relativePath;
+    
+    // 拼接待 index.js 的目錄
+    return `${extensionRootUrl}${cleanPath}`;
 }
 
-// 核心播放邏輯
 function playSound(src, isTest = false) {
-    const finalSrc = getAudioUrl(src);
-    if (!finalSrc) return;
+    const fullUrl = getFullAudioUrl(src);
+    if (!fullUrl) return;
 
-    // 取得當前設定的音量
     const vol = extension_settings[extensionName].volume ?? 0.5;
+    console.log(`[${extensionName}] Attempting play: ${fullUrl} (Vol: ${vol})`);
 
-    console.log(`[${extensionName}] Playing: ${finalSrc} (Vol: ${vol})`);
-
-    const audio = new Audio(finalSrc);
+    const audio = new Audio(fullUrl);
     audio.volume = vol;
 
-    const playPromise = audio.play();
-
-    if (playPromise !== undefined) {
-        playPromise.catch(error => {
-            console.warn(`[${extensionName}] Playback failed:`, error);
-            if (!isTest && error.name === 'NotAllowedError') {
-                console.warn(`[${extensionName}] Browser Autoplay Policy blocked the sound. Waiting for interaction.`);
-            }
-        });
-    }
+    audio.play().then(() => {
+        console.log(`[${extensionName}] Playing success.`);
+    }).catch(e => {
+        console.warn(`[${extensionName}] Play failed:`, e);
+        if (isTest) alert(`播放失敗: ${e.message}\n請檢查 Console (F12) 獲取詳情`);
+    });
 }
 
-// --- 閒置檢測邏輯 ---
-
+// 閒置邏輯
 function triggerIdleAction() {
     if (!extension_settings[extensionName].enableIdle) return;
-    if (isIdle) return; // 已經在閒置中就不重複觸發
+    if (isIdle) return;
 
     isIdle = true;
-    console.log(`[${extensionName}] Idle timeout reached. Playing idle sound.`);
+    console.log(`[${extensionName}] Idle state triggered.`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
 function resetIdleTimer() {
-    // 如果從閒置狀態恢復
     if (isIdle) {
         isIdle = false;
-        console.log(`[${extensionName}] User active. Idle state reset.`);
     }
-
     if (idleTimer) clearTimeout(idleTimer);
 
     if (extension_settings[extensionName].enableIdle) {
-        const timeInMs = Math.max(5, extension_settings[extensionName].idleTimeout) * 1000;
-        idleTimer = setTimeout(triggerIdleAction, timeInMs);
+        const timeoutSeconds = Math.max(5, extension_settings[extensionName].idleTimeout);
+        idleTimer = setTimeout(triggerIdleAction, timeoutSeconds * 1000);
     }
 }
 
 function setupIdleListeners() {
-    // 監聽常見的使用者互動
-    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
-    
-    // 使用 passive: true 優化效能
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'click', 'scroll'];
     events.forEach(event => {
         document.addEventListener(event, resetIdleTimer, { passive: true });
     });
-    
-    // 初始化計時器
     resetIdleTimer();
 }
 
-// --- 啟動音效邏輯 (處理 Autoplay) ---
-
+// 啟動音效 (等待使用者互動)
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
     if (hasPlayedStartup) return;
 
-    // 定義互動處理函數
-    const attemptPlay = () => {
+    const playStartup = () => {
         if (hasPlayedStartup) return;
-        
-        console.log(`[${extensionName}] User interaction detected. Playing startup sound.`);
+        console.log(`[${extensionName}] User interacted. Playing startup sound.`);
         playSound(extension_settings[extensionName].startupSoundSrc);
         hasPlayedStartup = true;
-
-        // 移除監聽器
-        ['click', 'keydown', 'touchstart'].forEach(evt => 
-            document.removeEventListener(evt, attemptPlay)
-        );
+        
+        ['click', 'keydown', 'touchstart'].forEach(e => document.removeEventListener(e, playStartup));
     };
 
-    // 由於瀏覽器限制，我們通常無法在頁面載入當下直接播放
-    // 我們掛載一個 "一次性" 的監聽器在 document 上
-    // 只要使用者點擊任意位置，就會觸發播放
-    ['click', 'keydown', 'touchstart'].forEach(evt => 
-        document.addEventListener(evt, attemptPlay, { once: true, passive: true })
+    ['click', 'keydown', 'touchstart'].forEach(e => 
+        document.addEventListener(e, playStartup, { once: true, passive: true })
     );
 }
 
-// --- UI 渲染 ---
-
+// --- 修正點 3: UI 渲染與重試機制 ---
 function renderSettings() {
     const settingsContainerId = `${extensionName}_settings`;
-    // 先移除舊的，避免重複
+    const targetContainer = $('#extensions_settings');
+
+    // 關鍵：如果目標容器還不存在，稍後再試 (這是 UI 不顯示的主因)
+    if (targetContainer.length === 0) {
+        console.log(`[${extensionName}] Extensions menu not ready. Retrying in 500ms...`);
+        setTimeout(renderSettings, 500);
+        return;
+    }
+
+    // 如果已經渲染過，先移除舊的
     $(`#${settingsContainerId}`).remove();
 
-    // 建立 HTML。這裡使用了 SillyTavern 標準的 CSS class
-    // .inline-drawer 負責外框
-    // .inline-drawer-toggle 負責標題與點擊區域
-    // .inline-drawer-content 負責內容
-    const settingsHtml = `
+    const html = `
     <div id="${settingsContainerId}" class="settings_content">
         <div class="inline-drawer">
             <div class="inline-drawer-toggle inline-drawer-header">
@@ -161,13 +146,9 @@ function renderSettings() {
                         Enable Startup Sound
                     </label>
                 </div>
-                
                 <div class="flex-container">
-                    <small style="flex:1;">Startup Audio Path (relative to extension folder)</small>
-                    <div style="display:flex; gap:5px; width:100%;">
-                        <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.wav" style="flex:2;">
-                        <div id="${extensionName}_test_startup" class="menu_button" style="width: auto;">Test</div>
-                    </div>
+                    <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.wav" style="flex:1;">
+                    <div id="${extensionName}_test_startup" class="menu_button">Test</div>
                 </div>
 
                 <hr>
@@ -178,91 +159,69 @@ function renderSettings() {
                         Enable Idle Sound
                     </label>
                 </div>
-
                 <div class="flex-container">
-                    <small style="flex:1;">Idle Audio Path</small>
-                    <div style="display:flex; gap:5px; width:100%;">
-                        <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.wav" style="flex:2;">
-                        <div id="${extensionName}_test_idle" class="menu_button" style="width: auto;">Test</div>
-                    </div>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.wav" style="flex:1;">
+                    <div id="${extensionName}_test_idle" class="menu_button">Test</div>
                 </div>
-
+                
                 <div class="flex-container">
-                    <small>Idle Timeout (Seconds)</small>
-                    <input type="number" class="text_pole" id="${extensionName}_timeout" value="${extension_settings[extensionName].idleTimeout}" min="5">
+                    <small>Timeout (Sec):</small>
+                    <input type="number" class="text_pole" id="${extensionName}_timeout" value="${extension_settings[extensionName].idleTimeout}" min="5" style="width: 80px;">
                 </div>
 
                 <hr>
-                
                 <div class="flex-container">
-                    <small>Volume (0.0 - 1.0)</small>
-                    <input type="number" class="text_pole" id="${extensionName}_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0">
+                    <small>Volume:</small>
+                    <input type="number" class="text_pole" id="${extensionName}_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0" style="width: 80px;">
                 </div>
-                
-                <div style="margin-top: 10px; opacity: 0.7;">
-                    <small><i>Files location: /SillyTavern/${extensionFolderPath}audio/</i></small>
+                <div style="margin-top:5px; font-size:0.8em; opacity:0.6;">
+                    Detected Path: ${extensionRootUrl}audio/
                 </div>
             </div>
         </div>
     </div>
     `;
 
-    // 將設定插入到 Extensions 選單中
-    $('#extensions_settings').append(settingsHtml);
+    targetContainer.append(html);
+    console.log(`[${extensionName}] UI Rendered Successfully.`);
 
-    // --- 事件綁定 ---
-    
-    // 綁定輸入框變更
+    // 綁定事件
     $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
     });
-
     $(`#${extensionName}_startup_src`).on('input', function() {
         extension_settings[extensionName].startupSoundSrc = $(this).val();
         saveSettingsDebounced();
     });
-
     $(`#${extensionName}_enable_idle`).on('change', function() {
         extension_settings[extensionName].enableIdle = $(this).is(':checked');
         resetIdleTimer();
         saveSettingsDebounced();
     });
-
     $(`#${extensionName}_idle_src`).on('input', function() {
         extension_settings[extensionName].idleSoundSrc = $(this).val();
         saveSettingsDebounced();
     });
-
     $(`#${extensionName}_timeout`).on('change', function() {
-        let val = parseInt($(this).val());
-        if (val < 5) val = 5;
-        extension_settings[extensionName].idleTimeout = val;
+        extension_settings[extensionName].idleTimeout = parseInt($(this).val());
         resetIdleTimer();
         saveSettingsDebounced();
     });
-
     $(`#${extensionName}_volume`).on('change', function() {
         extension_settings[extensionName].volume = parseFloat($(this).val());
         saveSettingsDebounced();
     });
-
-    // 測試按鈕功能
-    $(`#${extensionName}_test_startup`).on('click', function() {
-        playSound(extension_settings[extensionName].startupSoundSrc, true);
-    });
-
-    $(`#${extensionName}_test_idle`).on('click', function() {
-        playSound(extension_settings[extensionName].idleSoundSrc, true);
-    });
+    
+    // 測試按鈕
+    $(`#${extensionName}_test_startup`).click(() => playSound(extension_settings[extensionName].startupSoundSrc, true));
+    $(`#${extensionName}_test_idle`).click(() => playSound(extension_settings[extensionName].idleSoundSrc, true));
 }
 
-// 全域事件委派：處理摺疊選單 (Drawer) 的開關
-// 這是解決 UI 無法點開的關鍵，因為我們是動態插入 HTML
+// 摺疊選單事件 (使用 document 代理，防止元素重建失效)
 $(document).on('click', `#${extensionName}_settings .inline-drawer-toggle`, function() {
     const icon = $(this).find('.inline-drawer-icon');
     const content = $(this).next('.inline-drawer-content');
-    
     content.slideToggle(200);
     icon.toggleClass('down up');
 });
@@ -270,12 +229,14 @@ $(document).on('click', `#${extensionName}_settings .inline-drawer-toggle`, func
 // 初始化
 jQuery(async () => {
     try {
+        console.log(`[${extensionName}] Initializing...`);
         loadSettings();
-        renderSettings();
         setupIdleListeners();
-        triggerStartupAction(); // 註冊啟動音效等待使用者點擊
-        console.log(`[${extensionName}] Loaded successfully.`);
+        triggerStartupAction();
+        
+        // 嘗試渲染 UI (內部有重試機制)
+        renderSettings();
     } catch (e) {
-        console.error(`[${extensionName}] Error loading:`, e);
+        console.error(`[${extensionName}] Fatal Error:`, e);
     }
 });
