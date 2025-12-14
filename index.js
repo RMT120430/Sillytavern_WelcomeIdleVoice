@@ -1,7 +1,6 @@
 import {
     extension_settings,
     saveSettingsDebounced,
-    getContext,
 } from "../../../extensions.js";
 
 const extensionName = "Sillytavern_WelcomeIdleVoice";
@@ -10,23 +9,23 @@ const extensionFolderPath = `extensions/${extensionName}/`;
 // 預設設定
 const defaultSettings = {
     enableStartup: true,
-    startupSoundSrc: "", // 支援 URL 或相對路徑
+    startupSoundSrc: "audio/welcome.mp3", // 預設路徑建議指引到 audio 資料夾
     enableIdle: true,
-    idleSoundSrc: "",
-    idleTimeout: 60, // 秒
+    idleSoundSrc: "audio/idle.mp3",
+    idleTimeout: 60,
     volume: 0.5
 };
 
-// 用來追蹤閒置狀態
 let idleTimer = null;
 let isIdle = false;
 
 // 載入設定
 function loadSettings() {
+    // 如果設定檔中沒有這個插件的紀錄，初始化它
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
     }
-    // 合併預設值
+    // 補齊缺失的預設值
     for (const key in defaultSettings) {
         if (!Object.hasOwn(extension_settings[extensionName], key)) {
             extension_settings[extensionName][key] = defaultSettings[key];
@@ -34,161 +33,167 @@ function loadSettings() {
     }
 }
 
-// 撥放音效的通用函數
+// 撥放邏輯
 function playSound(src) {
     if (!src) return;
     
-    // 簡單的格式處理，如果不是 http 開頭，預設認為是在 extension 資料夾內
+    // 判斷路徑：如果是 http 開頭或是絕對路徑則不變，否則加上插件路徑
     let finalSrc = src;
-    if (!src.startsWith("http") && !src.startsWith("/")) {
+    if (!src.startsWith("http") && !src.startsWith("/") && !src.startsWith("file")) {
+        // 這樣使用者只需要填 "audio/xxx.mp3"
         finalSrc = extensionFolderPath + src;
     }
 
     const audio = new Audio(finalSrc);
-    audio.volume = extension_settings[extensionName].volume;
+    audio.volume = extension_settings[extensionName].volume || 0.5;
     
     audio.play().catch(e => {
-        console.warn(`[${extensionName}] Audio play failed (Browser Autoplay Policy?): - index.js:51`, e);
-        toastr.warning("Audio play blocked. Interact with the page first.", "Idle Voice");
+        console.warn(`[${extensionName}] Autoplay blocked or file not found: - index.js:51`, e);
     });
 }
 
-// ----------------------
-// 閒置 (AFK) 邏輯
-// ----------------------
-
+// 閒置邏輯
 function triggerIdleAction() {
     if (!extension_settings[extensionName].enableIdle) return;
-    if (isIdle) return; // 已經在閒置中，避免重複撥放
+    if (isIdle) return; 
 
     isIdle = true;
-    console.log(`[${extensionName}] User is idle. - index.js:65`);
+    console.log(`[${extensionName}] Idle state detected. - index.js:61`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
 function resetIdleTimer() {
-    // 如果之前是閒置狀態，現在恢復了，可以在這裡加邏輯 (例如 "歡迎回來" 音效，目前先略過)
     isIdle = false;
-
     if (idleTimer) clearTimeout(idleTimer);
 
     if (extension_settings[extensionName].enableIdle) {
-        const timeInMs = extension_settings[extensionName].idleTimeout * 1000;
+        const timeInMs = (extension_settings[extensionName].idleTimeout || 60) * 1000;
         idleTimer = setTimeout(triggerIdleAction, timeInMs);
     }
 }
 
 function setupIdleListeners() {
-    // 監聽各種使用者操作來重置計時器
     const events = ['mousemove', 'mousedown', 'keypress', 'touchstart', 'scroll', 'click'];
     events.forEach(event => {
         document.addEventListener(event, resetIdleTimer, { passive: true });
     });
-    
-    // 初始化計時器
     resetIdleTimer();
 }
 
-// ----------------------
-// 啟動 (Startup) 邏輯
-// ----------------------
-
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
-    
-    // 設定一個極短延遲確保頁面載入完畢
     setTimeout(() => {
-        console.log(`[${extensionName}] Playing startup sound. - index.js:101`);
+        console.log(`[${extensionName}] Startup sound triggered. - index.js:86`);
         playSound(extension_settings[extensionName].startupSoundSrc);
-    }, 1000);
+    }, 1500); // 稍微延後一點點以免瀏覽器還沒準備好
 }
 
 // ----------------------
-// UI 設定介面
+// UI 渲染 (修復重點)
 // ----------------------
-
 function renderSettings() {
+    // 產生 HTML ID，確保唯一性
+    const settingsContainerId = `${extensionName}_settings`;
+    
+    // 如果已經渲染過，先移除舊的 (避免重複)
+    $(`#${settingsContainerId}`).remove();
+
     const settingsHtml = `
-    <div class="settings_content">
-        <h3>Startup Settings</h3>
-        <label class="checkbox_label">
-            <input type="checkbox" id="st_iv_enable_startup" ${extension_settings[extensionName].enableStartup ? "checked" : ""}>
-            Enable Startup Sound
-        </label>
-        <div>
-            <small>Audio URL or Filename (put file in <code>${extensionFolderPath}</code>)</small>
-            <input type="text" class="text_pole" id="st_iv_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="startup.mp3">
-        </div>
+    <div id="${settingsContainerId}" class="settings_content">
+        <div class="inline-drawer">
+            <div class="inline-drawer-toggle inline-drawer-header">
+                <b>Welcome & Idle Voice</b>
+                <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+            </div>
+            <div class="inline-drawer-content">
+                <div class="flex-container">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="${extensionName}_enable_startup" ${extension_settings[extensionName].enableStartup ? "checked" : ""}>
+                        Enable Startup Sound
+                    </label>
+                </div>
+                <div>
+                    <small>Startup Audio Path (Relative to extension folder)</small>
+                    <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.mp3">
+                </div>
 
-        <hr>
+                <hr>
 
-        <h3>Idle (AFK) Settings</h3>
-        <label class="checkbox_label">
-            <input type="checkbox" id="st_iv_enable_idle" ${extension_settings[extensionName].enableIdle ? "checked" : ""}>
-            Enable Idle Sound
-        </label>
-        <div>
-            <small>Audio URL or Filename</small>
-            <input type="text" class="text_pole" id="st_iv_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="idle.mp3">
-        </div>
-        <div>
-            <small>Idle Timeout (Seconds)</small>
-            <input type="number" class="text_pole" id="st_iv_timeout" value="${extension_settings[extensionName].idleTimeout}" min="5">
-        </div>
+                <div class="flex-container">
+                    <label class="checkbox_label">
+                        <input type="checkbox" id="${extensionName}_enable_idle" ${extension_settings[extensionName].enableIdle ? "checked" : ""}>
+                        Enable Idle Sound
+                    </label>
+                </div>
+                <div>
+                    <small>Idle Audio Path</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src" value="${extension_settings[extensionName].idleSoundSrc}" placeholder="audio/idle.mp3">
+                </div>
+                <div>
+                    <small>Idle Timeout (Seconds)</small>
+                    <input type="number" class="text_pole" id="${extensionName}_timeout" value="${extension_settings[extensionName].idleTimeout}" min="5">
+                </div>
 
-        <hr>
-        
-        <div>
-            <small>Volume (0.1 - 1.0)</small>
-            <input type="number" class="text_pole" id="st_iv_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0">
+                <hr>
+                
+                <div>
+                    <small>Volume (0.1 - 1.0)</small>
+                    <input type="number" class="text_pole" id="${extensionName}_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0">
+                </div>
+                <div style="margin-top: 10px;">
+                    <small><i>Place your audio files in: <b>/public/extensions/${extensionName}/audio/</b></i></small>
+                </div>
+            </div>
         </div>
     </div>
     `;
 
-    // 將 HTML 注入到擴充設定選單中
+    // 將設定介面插入 SillyTavern 的擴充設定區塊
     $('#extensions_settings').append(settingsHtml);
 
-    // 綁定事件監聽器以儲存設定
-    $('#st_iv_enable_startup').on('change', function() {
+    // 綁定事件 (jQuery)
+    $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
     });
 
-    $('#st_iv_startup_src').on('input', function() {
+    $(`#${extensionName}_startup_src`).on('input', function() {
         extension_settings[extensionName].startupSoundSrc = $(this).val();
         saveSettingsDebounced();
     });
 
-    $('#st_iv_enable_idle').on('change', function() {
+    $(`#${extensionName}_enable_idle`).on('change', function() {
         extension_settings[extensionName].enableIdle = $(this).is(':checked');
-        resetIdleTimer(); // 設定改變時重置
+        resetIdleTimer();
         saveSettingsDebounced();
     });
 
-    $('#st_iv_idle_src').on('input', function() {
+    $(`#${extensionName}_idle_src`).on('input', function() {
         extension_settings[extensionName].idleSoundSrc = $(this).val();
         saveSettingsDebounced();
     });
 
-    $('#st_iv_timeout').on('change', function() {
+    $(`#${extensionName}_timeout`).on('change', function() {
         extension_settings[extensionName].idleTimeout = parseInt($(this).val());
-        resetIdleTimer(); // 時間改變時重置
+        resetIdleTimer();
         saveSettingsDebounced();
     });
     
-    $('#st_iv_volume').on('change', function() {
+    $(`#${extensionName}_volume`).on('change', function() {
         extension_settings[extensionName].volume = parseFloat($(this).val());
         saveSettingsDebounced();
     });
 }
 
-// ----------------------
-// 初始化
-// ----------------------
-
+// 監聽 SillyTavern 初始化完成
 jQuery(async () => {
-    loadSettings();
-    renderSettings();
-    setupIdleListeners();
-    triggerStartupAction();
+    try {
+        loadSettings();
+        renderSettings();
+        setupIdleListeners();
+        triggerStartupAction();
+        console.log(`[${extensionName}] Loaded successfully. - index.js:195`);
+    } catch (e) {
+        console.error(`[${extensionName}] Error loading: - index.js:197`, e);
+    }
 });
