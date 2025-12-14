@@ -10,7 +10,6 @@ const extensionName = "Sillytavern_WelcomeIdleVoice";
 const scriptUrl = import.meta.url; 
 const extensionRootUrl = scriptUrl.substring(0, scriptUrl.lastIndexOf('/') + 1);
 
-// 預設設定
 const defaultSettings = {
     enableStartup: true,
     startupSoundSrc: "audio/welcome.wav",
@@ -20,16 +19,11 @@ const defaultSettings = {
     volume: 0.9
 };
 
-// --- Web Audio API 全域變數 ---
-// 為了確保不漏接任何狀態，我們使用全域變數管理
 let audioCtx = null;
 let startupBuffer = null;
 let hasPlayedStartup = false;
 let isContextUnlocked = false;
 
-// -----------------------------------
-// 核心：初始化 AudioContext (惰性載入)
-// -----------------------------------
 function getAudioContext() {
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -38,9 +32,6 @@ function getAudioContext() {
     return audioCtx;
 }
 
-// -----------------------------------
-// 核心：載入並解碼 (Buffer Loader)
-// -----------------------------------
 async function loadAudioBuffer(url) {
     const ctx = getAudioContext();
     try {
@@ -49,20 +40,16 @@ async function loadAudioBuffer(url) {
         const arrayBuffer = await response.arrayBuffer();
         return await ctx.decodeAudioData(arrayBuffer);
     } catch (e) {
-        console.warn(`[${extensionName}] Load failed: ${url} - index.js:52`, e);
+        console.warn(`[${extensionName}] Load failed: ${url} - index.js:43`, e);
         return null;
     }
 }
 
-// -----------------------------------
-// 核心：播放邏輯
-// -----------------------------------
 async function playSound(srcOrBuffer, isTest = false) {
     const ctx = getAudioContext();
 
-    // 嘗試恢復 Context (如果還沒恢復)
     if (ctx.state === 'suspended') {
-        try { await ctx.resume(); } catch (e) { /* 忽略，等待使用者互動 */ }
+        try { await ctx.resume(); } catch (e) { /* Ignore and wait for user interaction. */ }
     }
 
     let buffer = null;
@@ -85,29 +72,22 @@ async function playSound(srcOrBuffer, isTest = false) {
     gainNode.connect(ctx.destination);
     source.start(0);
 
-    if (isTest) console.log(`[${extensionName}] Test sound played. - index.js:88`);
+    if (isTest) console.log(`[${extensionName}] Test sound played. - index.js:75`);
 }
 
-// -----------------------------------
-// 關鍵邏輯：全域互動監聽 (Global Unlocker)
-// -----------------------------------
-// 這個函式會定義在最外層，確保腳本一執行就開始監聽點擊
-// 不管 ST 介面有沒有載入，只要使用者點了視窗任何一處，就嘗試解鎖
 function attachGlobalUnlockListener() {
     const events = ['click', 'keydown', 'touchstart', 'mousedown'];
     
     const unlockHandler = () => {
         const ctx = getAudioContext();
         
-        // 1. 嘗試解鎖引擎
         if (ctx.state === 'suspended') {
             ctx.resume().then(() => {
-                console.log(`[${extensionName}] Audio Engine Unlocked via user gesture! - index.js:105`);
+                console.log(`[${extensionName}] Audio Engine Unlocked via user gesture! - index.js:86`);
                 isContextUnlocked = true;
                 
-                // 2. 檢查是否有掛單 (Buffer 已經好了，但還沒播)
                 if (extension_settings[extensionName]?.enableStartup && startupBuffer && !hasPlayedStartup) {
-                    console.log(`[${extensionName}] Buffer ready + Engine unlocked. Playing NOW. - index.js:110`);
+                    console.log(`[${extensionName}] Buffer ready + Engine unlocked. Playing NOW. - index.js:90`);
                     playSound(startupBuffer);
                     hasPlayedStartup = true;
                 }
@@ -116,20 +96,14 @@ function attachGlobalUnlockListener() {
             isContextUnlocked = true;
         }
         
-        // 移除監聽 (只需要一次成功即可)
-        // 注意：這裡不急著移除，直到確認 Context 真的變成 running
         if (ctx.state === 'running') {
             events.forEach(evt => window.removeEventListener(evt, unlockHandler, { capture: true }));
         }
     };
 
-    // 使用 window 層級 + capture: true，這是最強的攔截方式
     events.forEach(evt => window.addEventListener(evt, unlockHandler, { capture: true }));
 }
 
-// -----------------------------------
-// 輔助函式
-// -----------------------------------
 function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
@@ -148,28 +122,22 @@ function getFullAudioUrl(src) {
     return `${extensionRootUrl}${cleanPath}`;
 }
 
-// 預載啟動音效
 async function preloadStartup() {
     if (!extension_settings[extensionName].enableStartup) return;
     const url = getFullAudioUrl(extension_settings[extensionName].startupSoundSrc);
     if (url) {
-        console.log(`[${extensionName}] Downloading startup sound... - index.js:156`);
+        console.log(`[${extensionName}] Downloading startup sound... - index.js:129`);
         startupBuffer = await loadAudioBuffer(url);
         
-        // 情況 B：音檔下載比較慢，使用者已經點擊過頁面解鎖了引擎
-        // 這時候因為監聽器可能已經跑完了，所以我們要主動檢查一次
         const ctx = getAudioContext();
         if (ctx.state === 'running' && !hasPlayedStartup && isContextUnlocked) {
-            console.log(`[${extensionName}] Download finished after unlock. Playing NOW. - index.js:163`);
+            console.log(`[${extensionName}] Download finished after unlock. Playing NOW. - index.js:134`);
             playSound(startupBuffer);
             hasPlayedStartup = true;
         }
     }
 }
 
-// -----------------------------------
-// 閒置邏輯
-// -----------------------------------
 let idleTimer = null;
 let isIdle = false;
 
@@ -177,11 +145,10 @@ function triggerIdleAction() {
     if (!extension_settings[extensionName].enableIdle) return;
     if (isIdle) return;
     
-    // 只有在引擎是 running 狀態才播，不然會報錯
     const ctx = getAudioContext();
     if (ctx.state === 'running') {
         isIdle = true;
-        console.log(`[${extensionName}] Idle triggered. - index.js:184`);
+        console.log(`[${extensionName}] Idle triggered. - index.js:151`);
         playSound(extension_settings[extensionName].idleSoundSrc);
     }
 }
@@ -205,9 +172,6 @@ function setupIdleListeners() {
     resetIdleTimer();
 }
 
-// -----------------------------------
-// UI 渲染
-// -----------------------------------
 function renderSettings() {
     const settingsContainerId = `${extensionName}_settings`;
     const targetContainer = $('#extensions_settings');
@@ -265,7 +229,6 @@ function renderSettings() {
 
     targetContainer.append(html);
 
-    // 事件綁定
     $(`#${extensionName}_toggle`).on('click', function(e) {
         e.stopPropagation();
         $(this).next('.inline-drawer-content').slideToggle(200);
@@ -279,7 +242,7 @@ function renderSettings() {
     $(`#${extensionName}_startup_src`).on('input', function() {
         extension_settings[extensionName].startupSoundSrc = $(this).val();
         saveSettingsDebounced();
-        hasPlayedStartup = false; // 路徑改變後允許再次播放測試
+        hasPlayedStartup = false;
         preloadStartup();
     });
     $(`#${extensionName}_enable_idle`).on('change', function() {
@@ -320,21 +283,16 @@ function renderSettings() {
     });
 }
 
-// -----------------------------------
-// 立即執行區塊
-// -----------------------------------
-// 馬上掛載全域監聽，不要等待 jQuery ready，因為使用者可能在頁面載入中就點擊了
 attachGlobalUnlockListener();
 
-// 初始化流程
 jQuery(async () => {
     try {
         loadSettings();
-        await preloadStartup(); // 下載音檔
+        await preloadStartup();
         setupIdleListeners();
         renderSettings();
-        console.log(`[${extensionName}] Ready. - index.js:336`);
+        console.log(`[${extensionName}] Ready. - index.js:294`);
     } catch (e) {
-        console.error(`[${extensionName}] Error: - index.js:338`, e);
+        console.error(`[${extensionName}] Error: - index.js:296`, e);
     }
 });
