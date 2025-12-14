@@ -110,15 +110,6 @@ function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
     }
-
-    if (extension_settings[extensionName].idleSoundSrc !== undefined) {
-        if (!extension_settings[extensionName].idleSoundSrc1) {
-            extension_settings[extensionName].idleSoundSrc1 = extension_settings[extensionName].idleSoundSrc;
-        }
-        delete extension_settings[extensionName].idleSoundSrc;
-        saveSettingsDebounced();
-    }
-
     for (const key in defaultSettings) {
         if (!Object.hasOwn(extension_settings[extensionName], key)) {
             extension_settings[extensionName][key] = defaultSettings[key];
@@ -137,12 +128,12 @@ async function preloadStartup() {
     if (!extension_settings[extensionName].enableStartup) return;
     const url = getFullAudioUrl(extension_settings[extensionName].startupSoundSrc);
     if (url) {
-        console.log(`[${extensionName}] Downloading startup sound...  index.js:129 - index_v2.js:140`);
+        console.log(`[${extensionName}] Downloading startup sound...  index.js:129 - index_v2.js:131`);
         startupBuffer = await loadAudioBuffer(url);
         
         const ctx = getAudioContext();
         if (ctx.state === 'running' && !hasPlayedStartup && isContextUnlocked) {
-            console.log(`[${extensionName}] Download finished after unlock. Playing NOW.  index.js:134 - index_v2.js:145`);
+            console.log(`[${extensionName}] Download finished after unlock. Playing NOW.  index.js:134 - index_v2.js:136`);
             playSound(startupBuffer);
             hasPlayedStartup = true;
         }
@@ -159,22 +150,23 @@ function triggerIdleAction() {
     const ctx = getAudioContext();
     if (ctx.state === 'running') {
         isIdle = true;
-
+        
         const settings = extension_settings[extensionName];
-        const sources = [
-            settings.idleSoundSrc1, 
-            settings.idleSoundSrc2, 
+        
+        const availableSources = [
+            settings.idleSoundSrc1,
+            settings.idleSoundSrc2,
             settings.idleSoundSrc3
-        ].filter(src => src && src.trim() !== "");
+        ].filter(src => src && src.trim().length > 0);
 
-        if (sources.length === 0) {
-            console.log(`[${extensionName}] Idle triggered but no sources defined. - index_v2.js:171`);
+        if (availableSources.length === 0) {
+            console.log(`[${extensionName}] Idle triggered but no sound sources set. - index_v2.js:163`);
             return;
         }
 
-        const randomSrc = sources[Math.floor(Math.random() * sources.length)];
+        const randomSrc = availableSources[Math.floor(Math.random() * availableSources.length)];
 
-        console.log(`[${extensionName}] Idle triggered. Playing random source: ${randomSrc} - index_v2.js:177`);
+        console.log(`[${extensionName}] Idle triggered. Playing: ${randomSrc} - index_v2.js:169`);
         playSound(randomSrc);
     }
 }
@@ -231,28 +223,25 @@ function renderSettings() {
                 <div class="flex-container">
                     <label class="checkbox_label">
                         <input type="checkbox" id="${extensionName}_enable_idle" ${extension_settings[extensionName].enableIdle ? "checked" : ""}>
-                        Enable Idle Sound (Randomizes between 3 slots)
+                        Enable Idle Sound (Random 1 of 3)
                     </label>
                 </div>
                 
-                <!-- Idle Slot 1 -->
                 <div class="flex-container">
-                    <small style="width: 20px;">1.</small>
-                    <input type="text" class="text_pole" id="${extensionName}_idle_src1" value="${extension_settings[extensionName].idleSoundSrc1 || ''}" placeholder="audio/idle1.wav" style="flex:1;">
+                    <small style="min-width: 20px;">1.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src1" value="${extension_settings[extensionName].idleSoundSrc1}" placeholder="audio/idle1.wav" style="flex:1;">
                     <div id="${extensionName}_test_idle1" class="menu_button">Test</div>
                 </div>
                 
-                <!-- Idle Slot 2 -->
-                <div class="flex-container" style="margin-top:5px;">
-                    <small style="width: 20px;">2.</small>
-                    <input type="text" class="text_pole" id="${extensionName}_idle_src2" value="${extension_settings[extensionName].idleSoundSrc2 || ''}" placeholder="audio/idle2.wav" style="flex:1;">
+                <div class="flex-container" style="margin-top: 5px;">
+                    <small style="min-width: 20px;">2.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src2" value="${extension_settings[extensionName].idleSoundSrc2}" placeholder="audio/idle2.wav" style="flex:1;">
                     <div id="${extensionName}_test_idle2" class="menu_button">Test</div>
                 </div>
-
-                <!-- Idle Slot 3 -->
-                <div class="flex-container" style="margin-top:5px;">
-                    <small style="width: 20px;">3.</small>
-                    <input type="text" class="text_pole" id="${extensionName}_idle_src3" value="${extension_settings[extensionName].idleSoundSrc3 || ''}" placeholder="audio/idle3.wav" style="flex:1;">
+                
+                <div class="flex-container" style="margin-top: 5px;">
+                    <small style="min-width: 20px;">3.</small>
+                    <input type="text" class="text_pole" id="${extensionName}_idle_src3" value="${extension_settings[extensionName].idleSoundSrc3}" placeholder="audio/idle3.wav" style="flex:1;">
                     <div id="${extensionName}_test_idle3" class="menu_button">Test</div>
                 </div>
 
@@ -289,6 +278,7 @@ function renderSettings() {
         hasPlayedStartup = false;
         preloadStartup();
     });
+
     $(`#${extensionName}_enable_idle`).on('change', function() {
         extension_settings[extensionName].enableIdle = $(this).is(':checked');
         resetIdleTimer();
@@ -312,6 +302,7 @@ function renderSettings() {
         extension_settings[extensionName].volume = parseFloat($(this).val());
         saveSettingsDebounced();
     });
+
     $(`#${extensionName}_timeout_apply`).on('click', function(e) {
         e.stopPropagation();
         const inputElem = $(`#${extensionName}_timeout_input`);
@@ -354,8 +345,8 @@ jQuery(async () => {
         await preloadStartup();
         setupIdleListeners();
         renderSettings();
-        console.log(`[${extensionName}] Ready.  index.js:294 - index_v2.js:357`);
+        console.log(`[${extensionName}] Ready.  index.js:294 - index_v2.js:348`);
     } catch (e) {
-        console.error(`[${extensionName}] Error:  index.js:296 - index_v2.js:359`, e);
+        console.error(`[${extensionName}] Error:  index.js:296 - index_v2.js:350`, e);
     }
 });
