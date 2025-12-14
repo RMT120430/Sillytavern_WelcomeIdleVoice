@@ -17,7 +17,7 @@ const defaultSettings = {
     enableIdle: true,
     idleSoundSrc: "audio/idle.wav",
     idleTimeout: 60,
-    volume: 0.5
+    volume: 0.9
 };
 
 let idleTimer = null;
@@ -55,7 +55,7 @@ function playSound(src, isTest = false) {
 
     if (playPromise !== undefined) {
         playPromise.catch(error => {
-            console.warn(`[${extensionName}] Play failed:`, error);
+            console.warn(`[${extensionName}] Play failed: - index.js:58`, error);
             // 如果不是測試，且是被瀏覽器阻擋，我們不彈窗干擾使用者，只在背景記錄
             if (isTest) {
                 alert(`播放失敗 (Play failed): ${error.message}`);
@@ -70,7 +70,7 @@ function triggerIdleAction() {
     if (isIdle) return;
 
     isIdle = true;
-    console.log(`[${extensionName}] Idle triggered.`);
+    console.log(`[${extensionName}] Idle triggered. - index.js:73`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
@@ -101,7 +101,7 @@ function triggerStartupAction() {
     const forcePlay = () => {
         if (hasPlayedStartup) return;
         
-        console.log(`[${extensionName}] User clicked. Playing startup sound NOW.`);
+        console.log(`[${extensionName}] User clicked. Playing startup sound NOW. - index.js:104`);
         playSound(extension_settings[extensionName].startupSoundSrc);
         hasPlayedStartup = true;
 
@@ -239,7 +239,7 @@ function renderSettings() {
         playSound(extension_settings[extensionName].idleSoundSrc, true);
     });
 
-    console.log(`[${extensionName}] UI Rendered & Events Bound.`);
+    console.log(`[${extensionName}] UI Rendered & Events Bound. - index.js:242`);
 }
 
 // 初始化
@@ -250,6 +250,6 @@ jQuery(async () => {
         triggerStartupAction();
         renderSettings();
     } catch (e) {
-        console.error(`[${extensionName}] Error:`, e);
+        console.error(`[${extensionName}] Error: - index.js:253`, e);
     }
 });
