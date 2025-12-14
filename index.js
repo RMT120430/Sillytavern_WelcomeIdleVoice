@@ -2,15 +2,12 @@ import {
     extension_settings,
 } from "../../../extensions.js";
 
-// 修正點：saveSettingsDebounced 通常位於 script.js，路徑需要多往上一層
-// 如果你的環境報錯找不到 script.js，請嘗試改成 "../../../script.js"
+// 引用 ST 主程式的存檔函數
 import {
     saveSettingsDebounced,
 } from "../../../../script.js";
 
 const extensionName = "Sillytavern_WelcomeIdleVoice";
-
-// 自動抓取當前模組的路徑
 const scriptUrl = import.meta.url; 
 const extensionRootUrl = scriptUrl.substring(0, scriptUrl.lastIndexOf('/') + 1);
 
@@ -27,7 +24,6 @@ let idleTimer = null;
 let isIdle = false;
 let hasPlayedStartup = false;
 
-// 載入設定
 function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
@@ -37,10 +33,8 @@ function loadSettings() {
             extension_settings[extensionName][key] = defaultSettings[key];
         }
     }
-    console.log(`[${extensionName}] Settings loaded.`);
 }
 
-// 取得正確的音訊路徑
 function getFullAudioUrl(src) {
     if (!src) return null;
     if (src.startsWith("http")) return src;
@@ -48,39 +42,40 @@ function getFullAudioUrl(src) {
     return `${extensionRootUrl}${cleanPath}`;
 }
 
-// 播放邏輯
+// 播放核心 (優化版)
 function playSound(src, isTest = false) {
     const fullUrl = getFullAudioUrl(src);
     if (!fullUrl) return;
 
     const vol = extension_settings[extensionName].volume ?? 0.5;
-    console.log(`[${extensionName}] Attempting play: ${fullUrl} (Vol: ${vol})`);
-
     const audio = new Audio(fullUrl);
     audio.volume = vol;
 
-    audio.play().then(() => {
-        console.log(`[${extensionName}] Playing success.`);
-    }).catch(e => {
-        console.warn(`[${extensionName}] Play failed:`, e);
-        if (isTest) alert(`播放失敗: ${e.message}\n請檢查 Console (F12) 獲取詳情`);
-    });
+    const playPromise = audio.play();
+
+    if (playPromise !== undefined) {
+        playPromise.catch(error => {
+            console.warn(`[${extensionName}] Play failed:`, error);
+            // 如果不是測試，且是被瀏覽器阻擋，我們不彈窗干擾使用者，只在背景記錄
+            if (isTest) {
+                alert(`播放失敗 (Play failed): ${error.message}`);
+            }
+        });
+    }
 }
 
-// 閒置邏輯
+// --- 閒置邏輯 ---
 function triggerIdleAction() {
     if (!extension_settings[extensionName].enableIdle) return;
     if (isIdle) return;
 
     isIdle = true;
-    console.log(`[${extensionName}] Idle state triggered.`);
+    console.log(`[${extensionName}] Idle triggered.`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
 function resetIdleTimer() {
-    if (isIdle) {
-        isIdle = false;
-    }
+    if (isIdle) isIdle = false;
     if (idleTimer) clearTimeout(idleTimer);
 
     if (extension_settings[extensionName].enableIdle) {
@@ -97,26 +92,33 @@ function setupIdleListeners() {
     resetIdleTimer();
 }
 
-// 啟動音效
+// --- 啟動音效 (強制互動版) ---
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
     if (hasPlayedStartup) return;
 
-    const playStartup = () => {
+    // 定義一個強制的點擊監聽器
+    const forcePlay = () => {
         if (hasPlayedStartup) return;
-        console.log(`[${extensionName}] User interacted. Playing startup sound.`);
+        
+        console.log(`[${extensionName}] User clicked. Playing startup sound NOW.`);
         playSound(extension_settings[extensionName].startupSoundSrc);
         hasPlayedStartup = true;
-        
-        ['click', 'keydown', 'touchstart'].forEach(e => document.removeEventListener(e, playStartup));
+
+        // 移除監聽
+        ['click', 'keydown', 'touchstart'].forEach(e => 
+            document.removeEventListener(e, forcePlay)
+        );
     };
 
+    // 監聽 document 上的任意點擊，這通常是瀏覽器最認可的「互動」
     ['click', 'keydown', 'touchstart'].forEach(e => 
-        document.addEventListener(e, playStartup, { once: true, passive: true })
+        document.addEventListener(e, forcePlay, { once: true, capture: true }) 
+        // capture: true 確保我們比其他腳本更早抓到事件
     );
 }
 
-// UI 渲染
+// --- UI 渲染 (修復展開問題) ---
 function renderSettings() {
     const settingsContainerId = `${extensionName}_settings`;
     const targetContainer = $('#extensions_settings');
@@ -131,7 +133,8 @@ function renderSettings() {
     const html = `
     <div id="${settingsContainerId}" class="settings_content">
         <div class="inline-drawer">
-            <div class="inline-drawer-toggle inline-drawer-header">
+            <!-- 給 Toggle 一個明確的 ID 以便綁定 -->
+            <div id="${extensionName}_toggle" class="inline-drawer-toggle inline-drawer-header">
                 <b>Welcome & Idle Voice</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
@@ -178,7 +181,27 @@ function renderSettings() {
 
     targetContainer.append(html);
 
-    // 事件綁定
+    // --- 關鍵修復：直接綁定點擊事件，不使用 document 委派 ---
+    // 這樣可以確保點擊一定會觸發，不會被其他層級吃掉
+    $(`#${extensionName}_toggle`).on('click', function(e) {
+        // 阻止事件冒泡，避免 ST 其他腳本干擾 (如果有的話)
+        e.stopPropagation();
+        
+        const icon = $(this).find('.inline-drawer-icon');
+        const content = $(this).next('.inline-drawer-content');
+        
+        // 使用 jQuery 動畫切換
+        content.slideToggle(200);
+        
+        // 切換圖示方向
+        if (icon.hasClass('down')) {
+            icon.removeClass('down').addClass('up');
+        } else {
+            icon.removeClass('up').addClass('down');
+        }
+    });
+
+    // 設定值綁定
     $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
@@ -206,27 +229,27 @@ function renderSettings() {
         saveSettingsDebounced();
     });
     
-    $(`#${extensionName}_test_startup`).click(() => playSound(extension_settings[extensionName].startupSoundSrc, true));
-    $(`#${extensionName}_test_idle`).click(() => playSound(extension_settings[extensionName].idleSoundSrc, true));
-}
+    // 測試按鈕
+    $(`#${extensionName}_test_startup`).on('click', (e) => {
+        e.stopPropagation(); // 防止測試按鈕觸發摺疊
+        playSound(extension_settings[extensionName].startupSoundSrc, true);
+    });
+    $(`#${extensionName}_test_idle`).on('click', (e) => {
+        e.stopPropagation();
+        playSound(extension_settings[extensionName].idleSoundSrc, true);
+    });
 
-// 摺疊選單事件
-$(document).on('click', `#${extensionName}_settings .inline-drawer-toggle`, function() {
-    const icon = $(this).find('.inline-drawer-icon');
-    const content = $(this).next('.inline-drawer-content');
-    content.slideToggle(200);
-    icon.toggleClass('down up');
-});
+    console.log(`[${extensionName}] UI Rendered & Events Bound.`);
+}
 
 // 初始化
 jQuery(async () => {
     try {
-        console.log(`[${extensionName}] Initializing...`);
         loadSettings();
         setupIdleListeners();
         triggerStartupAction();
         renderSettings();
     } catch (e) {
-        console.error(`[${extensionName}] Fatal Error:`, e);
+        console.error(`[${extensionName}] Error:`, e);
     }
 });
