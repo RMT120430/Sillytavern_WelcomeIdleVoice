@@ -47,7 +47,7 @@ function playSound(src, isTest = false) {
     const fullUrl = getFullAudioUrl(src);
     if (!fullUrl) return;
 
-    const vol = extension_settings[extensionName].volume ?? 0.5;
+    const vol = extension_settings[extensionName].volume ?? 0.9;
     const audio = new Audio(fullUrl);
     audio.volume = vol;
 
