@@ -4,12 +4,13 @@ import {
 } from "../../../extensions.js";
 
 const extensionName = "Sillytavern_WelcomeIdleVoice";
-const extensionFolderPath = `extensions/${extensionName}/`;
+// 確保路徑以 / 開頭，指向伺服器根目錄，避免相對路徑錯誤
+const extensionFolderPath = `/extensions/${extensionName}/`;
 
 // 預設設定
 const defaultSettings = {
     enableStartup: true,
-    startupSoundSrc: "audio/welcome.wav", // 預設路徑建議指引到 audio 資料夾
+    startupSoundSrc: "audio/welcome.wav",
     enableIdle: true,
     idleSoundSrc: "audio/idle.wav",
     idleTimeout: 60,
@@ -18,14 +19,13 @@ const defaultSettings = {
 
 let idleTimer = null;
 let isIdle = false;
+let hasPlayedStartup = false; // 確保歡迎音效只放一次
 
 // 載入設定
 function loadSettings() {
-    // 如果設定檔中沒有這個插件的紀錄，初始化它
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
     }
-    // 補齊缺失的預設值
     for (const key in defaultSettings) {
         if (!Object.hasOwn(extension_settings[extensionName], key)) {
             extension_settings[extensionName][key] = defaultSettings[key];
@@ -36,29 +36,34 @@ function loadSettings() {
 // 撥放邏輯
 function playSound(src) {
     if (!src) return;
-    
-    // 判斷路徑：如果是 http 開頭或是絕對路徑則不變，否則加上插件路徑
+
     let finalSrc = src;
-    if (!src.startsWith("http") && !src.startsWith("/") && !src.startsWith("file")) {
-        // 這樣使用者只需要填 "audio/xxx.wav"
+    // 簡單的路徑處理：如果是 http 開頭或已經是絕對路徑則不變
+    // 否則加上插件目錄前綴
+    if (!src.startsWith("http") && !src.startsWith("/")) {
         finalSrc = extensionFolderPath + src;
     }
 
+    console.log(`[${extensionName}] Attempting to play: ${finalSrc}`);
+
     const audio = new Audio(finalSrc);
     audio.volume = extension_settings[extensionName].volume || 0.5;
-    
+
+    // 嘗試撥放，並捕捉 Autoplay 錯誤
     audio.play().catch(e => {
-        console.warn(`[${extensionName}] Autoplay blocked or file not found: - index.js:51`, e);
+        console.warn(`[${extensionName}] Playback failed. Likely due to browser Autoplay Policy or file not found.`, e);
     });
 }
 
 // 閒置邏輯
 function triggerIdleAction() {
     if (!extension_settings[extensionName].enableIdle) return;
-    if (isIdle) return; 
+    // 如果已經在閒置狀態且已經觸發過，可以根據需求決定是否重複撥放
+    // 這裡設計為：一旦進入閒置，撥放一次，直到使用者動滑鼠重置
+    if (isIdle) return;
 
     isIdle = true;
-    console.log(`[${extensionName}] Idle state detected. - index.js:61`);
+    console.log(`[${extensionName}] Idle state detected.`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
@@ -80,24 +85,40 @@ function setupIdleListeners() {
     resetIdleTimer();
 }
 
+// 啟動音效邏輯 (修復 Autoplay 問題)
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
-    setTimeout(() => {
-        console.log(`[${extensionName}] Startup sound triggered. - index.js:86`);
+    if (hasPlayedStartup) return;
+
+    // 定義一個一次性的互動監聽器
+    const interactionHandler = () => {
+        if (hasPlayedStartup) return;
+        
+        console.log(`[${extensionName}] User interaction detected, playing startup sound.`);
         playSound(extension_settings[extensionName].startupSoundSrc);
-    }, 1500); // 稍微延後一點點以免瀏覽器還沒準備好
+        hasPlayedStartup = true;
+
+        // 移除監聽器，避免重複觸發
+        ['click', 'keydown', 'touchstart'].forEach(evt => 
+            document.removeEventListener(evt, interactionHandler)
+        );
+    };
+
+    // 瀏覽器通常不允許頁面載入後立即自動撥放聲音
+    // 我們必須等待使用者的第一次 "點擊" 或 "按鍵"
+    ['click', 'keydown', 'touchstart'].forEach(evt => 
+        document.addEventListener(evt, interactionHandler, { once: true, passive: true })
+    );
 }
 
 // ----------------------
-// UI 渲染 (修復重點)
+// UI 渲染 (修復 CSS 與摺疊功能)
 // ----------------------
 function renderSettings() {
-    // 產生 HTML ID，確保唯一性
     const settingsContainerId = `${extensionName}_settings`;
-    
-    // 如果已經渲染過，先移除舊的 (避免重複)
     $(`#${settingsContainerId}`).remove();
 
+    // 注意：HTML 結構嚴格參照 SillyTavern 的樣式習慣
     const settingsHtml = `
     <div id="${settingsContainerId}" class="settings_content">
         <div class="inline-drawer">
@@ -105,7 +126,7 @@ function renderSettings() {
                 <b>Welcome & Idle Voice</b>
                 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
             </div>
-            <div class="inline-drawer-content">
+            <div class="inline-drawer-content" style="display:none;">
                 <div class="flex-container">
                     <label class="checkbox_label">
                         <input type="checkbox" id="${extensionName}_enable_startup" ${extension_settings[extensionName].enableStartup ? "checked" : ""}>
@@ -137,21 +158,38 @@ function renderSettings() {
                 <hr>
                 
                 <div>
-                    <small>Volume (0.1 - 1.0)</small>
+                    <small>Volume (0.0 - 1.0)</small>
                     <input type="number" class="text_pole" id="${extensionName}_volume" value="${extension_settings[extensionName].volume}" step="0.1" max="1" min="0">
                 </div>
                 <div style="margin-top: 10px;">
-                    <small><i>Place your audio files in: <b>/public/extensions/${extensionName}/audio/</b></i></small>
+                    <small><i>Place your audio files in: <b>/extensions/${extensionName}/audio/</b></i></small>
                 </div>
             </div>
         </div>
     </div>
     `;
 
-    // 將設定介面插入 SillyTavern 的擴充設定區塊
     $('#extensions_settings').append(settingsHtml);
 
-    // 綁定事件 (jQuery)
+    // --- UI 事件綁定區 ---
+
+    // 1. 手動添加摺疊/展開邏輯 (這是 UI 無法正確運作的主因)
+    const $drawer = $(`#${settingsContainerId} .inline-drawer-toggle`);
+    $drawer.on('click', function() {
+        const $icon = $(this).find('.inline-drawer-icon');
+        const $content = $(this).next('.inline-drawer-content');
+        
+        $content.slideToggle(200); // 執行動畫
+        
+        // 切換圖標方向
+        if ($icon.hasClass('down')) {
+            $icon.removeClass('down').addClass('up');
+        } else {
+            $icon.removeClass('up').addClass('down');
+        }
+    });
+
+    // 2. 設定值變更監聽
     $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
@@ -164,7 +202,7 @@ function renderSettings() {
 
     $(`#${extensionName}_enable_idle`).on('change', function() {
         extension_settings[extensionName].enableIdle = $(this).is(':checked');
-        resetIdleTimer();
+        resetIdleTimer(); // 狀態改變時重置計時器
         saveSettingsDebounced();
     });
 
@@ -174,7 +212,9 @@ function renderSettings() {
     });
 
     $(`#${extensionName}_timeout`).on('change', function() {
-        extension_settings[extensionName].idleTimeout = parseInt($(this).val());
+        let val = parseInt($(this).val());
+        if (val < 5) val = 5; // 最小限制
+        extension_settings[extensionName].idleTimeout = val;
         resetIdleTimer();
         saveSettingsDebounced();
     });
@@ -185,15 +225,15 @@ function renderSettings() {
     });
 }
 
-// 監聽 SillyTavern 初始化完成
+// 監聽 SillyTavern 初始化
 jQuery(async () => {
     try {
         loadSettings();
         renderSettings();
         setupIdleListeners();
         triggerStartupAction();
-        console.log(`[${extensionName}] Loaded successfully. - index.js:195`);
+        console.log(`[${extensionName}] Loaded successfully.`);
     } catch (e) {
-        console.error(`[${extensionName}] Error loading: - index.js:197`, e);
+        console.error(`[${extensionName}] Error loading:`, e);
     }
 });
