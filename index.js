@@ -16,15 +16,15 @@ const defaultSettings = {
     startupSoundSrc: "audio/welcome.wav",
     enableIdle: true,
     idleSoundSrc: "audio/idle.wav",
-    idleTimeout: 60, // 預設改為 60
-    volume: 0.5
+    idleTimeout: 60,
+    volume: 0.9
 };
 
 let idleTimer = null;
 let isIdle = false;
 let hasPlayedStartup = false;
-let startupAudioObj = null; // 用來預載 Startup 音效
 
+// 載入設定
 function loadSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = {};
@@ -36,6 +36,7 @@ function loadSettings() {
     }
 }
 
+// 取得完整路徑
 function getFullAudioUrl(src) {
     if (!src) return null;
     if (src.startsWith("http")) return src;
@@ -43,43 +44,32 @@ function getFullAudioUrl(src) {
     return `${extensionRootUrl}${cleanPath}`;
 }
 
-// 預載啟動音效 (解決 Autoplay 延遲問題)
-function preloadStartupSound() {
-    if (!extension_settings[extensionName].enableStartup) return;
-    const src = extension_settings[extensionName].startupSoundSrc;
-    const url = getFullAudioUrl(src);
-    if (url) {
-        startupAudioObj = new Audio(url);
-        startupAudioObj.preload = "auto";
-        startupAudioObj.volume = extension_settings[extensionName].volume ?? 0.5;
-        startupAudioObj.load(); // 強制瀏覽器先緩衝
-    }
-}
+/**
+ * 核心播放函式
+ * @param {string} src - 音檔路徑
+ * @param {boolean} isTest - 是否為測試按鈕觸發
+ * @param {boolean} forceSync - (新功能) 是否強制同步播放 (用於啟動音效)
+ */
+function playSound(src, isTest = false, forceSync = false) {
+    const fullUrl = getFullAudioUrl(src);
+    if (!fullUrl) return;
 
-function playSound(src, isTest = false, preloadedObj = null) {
-    const vol = extension_settings[extensionName].volume ?? 0.5;
-    let audio;
+    const vol = extension_settings[extensionName].volume ?? 0.9;
 
-    // 如果有預載好的物件，直接使用，速度最快
-    if (preloadedObj) {
-        audio = preloadedObj;
-        audio.volume = vol; // 確保音量是最新的
-    } else {
-        const fullUrl = getFullAudioUrl(src);
-        if (!fullUrl) return;
-        audio = new Audio(fullUrl);
-        audio.volume = vol;
-    }
+    // 關鍵修正：如果是啟動音效，我們不使用任何非同步邏輯，直接建立並播放
+    // 這樣瀏覽器才會將其視為「使用者行為的一部分」
+    const audio = new Audio(fullUrl);
+    audio.volume = vol;
 
     const playPromise = audio.play();
 
     if (playPromise !== undefined) {
         playPromise.then(() => {
-            console.log(`[${extensionName}] Playing success.`);
+            console.log(`[${extensionName}] Playing: ${src} - index.js:68`);
         }).catch(error => {
-            console.warn(`[${extensionName}] Play failed:`, error);
+            console.warn(`[${extensionName}] Play failed: - index.js:70`, error);
             if (isTest) {
-                alert(`播放失敗: ${error.message}\n(請確認檔案格式是否為 wav/mp3)`);
+                alert(`播放失敗: ${error.message}\n(請確認檔案格式正確，且瀏覽器允許聲音播放)`);
             }
         });
     }
@@ -91,7 +81,7 @@ function triggerIdleAction() {
     if (isIdle) return;
 
     isIdle = true;
-    console.log(`[${extensionName}] Idle triggered.`);
+    console.log(`[${extensionName}] Idle triggered. - index.js:84`);
     playSound(extension_settings[extensionName].idleSoundSrc);
 }
 
@@ -100,7 +90,7 @@ function resetIdleTimer() {
     if (idleTimer) clearTimeout(idleTimer);
 
     if (extension_settings[extensionName].enableIdle) {
-        // 確保至少 60 秒 (這裡做雙重防護)
+        // 確保至少 60 秒
         let timeout = extension_settings[extensionName].idleTimeout;
         if (timeout < 60) timeout = 60; 
 
@@ -116,7 +106,7 @@ function setupIdleListeners() {
     resetIdleTimer();
 }
 
-// --- 啟動音效 (改進版：使用 mousedown/keydown) ---
+// --- 啟動音效 (最終修正版：即時建立策略) ---
 function triggerStartupAction() {
     if (!extension_settings[extensionName].enableStartup) return;
     if (hasPlayedStartup) return;
@@ -125,10 +115,23 @@ function triggerStartupAction() {
     const forcePlay = (e) => {
         if (hasPlayedStartup) return;
         
-        console.log(`[${extensionName}] User interaction (${e.type}) detected. Playing startup sound.`);
+        // 這裡非常重要：
+        // 我們不讀取任何外部變數，不在這裡做複雜的 console.log，也不使用預載物件。
+        // 直接讀取設定 -> 建立 Audio -> Play
+        // 這能最大程度騙過瀏覽器，讓它認為這是按鈕的點擊音效
+        const src = extension_settings[extensionName].startupSoundSrc;
+        const vol = extension_settings[extensionName].volume ?? 0.9;
+        const url = getFullAudioUrl(src);
         
-        // 使用預載好的物件播放
-        playSound(null, false, startupAudioObj);
+        if (url) {
+            const tempAudio = new Audio(url);
+            tempAudio.volume = vol;
+            tempAudio.play().then(() => {
+                console.log(`[${extensionName}] Startup sound success. - index.js:130`);
+            }).catch(err => {
+                console.warn(`[${extensionName}] Startup blocked by browser: - index.js:132`, err);
+            });
+        }
         
         hasPlayedStartup = true;
 
@@ -138,8 +141,7 @@ function triggerStartupAction() {
         );
     };
 
-    // 使用 capture: true 確保在事件傳遞的最早期就捕捉到
-    // 增加 mousedown 和 keydown，比 click 反應更快
+    // 監聽所有可能的互動，使用 capture: true 確保優先權
     ['mousedown', 'keydown', 'touchstart', 'click'].forEach(evt => 
         document.addEventListener(evt, forcePlay, { once: true, capture: true }) 
     );
@@ -172,6 +174,9 @@ function renderSettings() {
                         <input type="checkbox" id="${extensionName}_enable_startup" ${extension_settings[extensionName].enableStartup ? "checked" : ""}>
                         Enable Startup Sound
                     </label>
+                </div>
+                <div style="margin-bottom: 5px;">
+                    <small><i>Note: Plays on first click/interaction due to browser policy.</i></small>
                 </div>
                 <div class="flex-container">
                     <input type="text" class="text_pole" id="${extensionName}_startup_src" value="${extension_settings[extensionName].startupSoundSrc}" placeholder="audio/welcome.wav" style="flex:1;">
@@ -213,7 +218,6 @@ function renderSettings() {
 
     // --- 事件綁定 ---
 
-    // Toggle 展開/摺疊
     $(`#${extensionName}_toggle`).on('click', function(e) {
         e.stopPropagation();
         const icon = $(this).find('.inline-drawer-icon');
@@ -222,7 +226,6 @@ function renderSettings() {
         icon.toggleClass('down up');
     });
 
-    // 一般設定 (Debounce Save)
     $(`#${extensionName}_enable_startup`).on('change', function() {
         extension_settings[extensionName].enableStartup = $(this).is(':checked');
         saveSettingsDebounced();
@@ -230,8 +233,6 @@ function renderSettings() {
     $(`#${extensionName}_startup_src`).on('input', function() {
         extension_settings[extensionName].startupSoundSrc = $(this).val();
         saveSettingsDebounced();
-        // 如果路徑改變，更新預載物件
-        preloadStartupSound(); 
     });
     $(`#${extensionName}_enable_idle`).on('change', function() {
         extension_settings[extensionName].enableIdle = $(this).is(':checked');
@@ -245,38 +246,30 @@ function renderSettings() {
     $(`#${extensionName}_volume`).on('change', function() {
         extension_settings[extensionName].volume = parseFloat($(this).val());
         saveSettingsDebounced();
-        if (startupAudioObj) startupAudioObj.volume = extension_settings[extensionName].volume;
     });
 
-    // --- 新增：Idle Timeout Apply 按鈕邏輯 ---
+    // Idle Timeout Apply
     $(`#${extensionName}_timeout_apply`).on('click', function(e) {
         e.stopPropagation();
         const inputElem = $(`#${extensionName}_timeout_input`);
         let val = parseInt(inputElem.val());
         
-        // 防呆邏輯：如果不是數字或小於60，強制設為60
         if (isNaN(val) || val < 60) {
             val = 60;
         }
 
-        // 更新 UI 顯示正確的值
         inputElem.val(val);
-        
-        // 存檔與應用
         extension_settings[extensionName].idleTimeout = val;
         saveSettingsDebounced();
         resetIdleTimer();
 
-        // 簡單的視覺回饋
         const btn = $(this);
         const originalText = btn.text();
         btn.text("Saved!");
         setTimeout(() => btn.text(originalText), 1500);
-
-        console.log(`[${extensionName}] Idle timeout updated to ${val}s`);
     });
 
-    // 測試按鈕
+    // Tests
     $(`#${extensionName}_test_startup`).on('click', (e) => {
         e.stopPropagation();
         playSound(extension_settings[extensionName].startupSoundSrc, true);
@@ -291,11 +284,11 @@ function renderSettings() {
 jQuery(async () => {
     try {
         loadSettings();
-        preloadStartupSound(); // 啟動預載
         setupIdleListeners();
         triggerStartupAction();
         renderSettings();
+        console.log(`[${extensionName}] Ready. Waiting for interaction to play startup sound. - index.js:290`);
     } catch (e) {
-        console.error(`[${extensionName}] Error:`, e);
+        console.error(`[${extensionName}] Error: - index.js:292`, e);
     }
 });
